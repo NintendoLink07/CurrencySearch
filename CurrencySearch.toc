@@ -1,0 +1,14 @@
+## Interface: 110005
+## Title: CurrencySearch
+## Author: Rhany-Ravencrest
+## IconTexture: Interface\AddOns\CurrencySearch\res\Logo_256.png
+## Notes: QoL search bar for your currencies.
+## Version: 1.0.0
+## SavedVariables: CURRENCYSEARCH_SETTINGS
+## AddonCompartmentFunc: CURRENCYSEARCH_OpenInterfaceOptions
+
+## X-Website: https://github.com/NintendoLink07/CurrencySearch
+## X-Curse-Project-ID: 1114373
+## X-Wago-ID: O67j5YN3
+
+CurrencySearch.lua
