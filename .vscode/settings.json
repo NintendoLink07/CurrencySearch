@@ -86,7 +86,9 @@
         "TokenFrame",
         "CharacterFrameTab3",
         "ScrollBoxListMixin",
-        "CharacterFramePortrait"
+        "CharacterFramePortrait",
+        "TokenFramePopup",
+        "GameTooltip_Hide"
     ],
     "Lua.runtime.version": "Lua 5.1",
     "Lua.runtime.builtin": {
