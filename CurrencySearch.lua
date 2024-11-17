@@ -1,5 +1,4 @@
-local addonName, rs = ...
-local wticc = WrapTextInColorCode
+local addonName, cs = ...
 
 local searchBox
 local eventReceiver = CreateFrame("Frame")
@@ -11,18 +10,21 @@ local category = Settings.RegisterVerticalLayoutCategory(addonName)
 
 local baseList = {}
 local map = {}
-local headers = {}
+
+local expandedList = {}
 
 local function expandAllHeaders()
-    for currencyIndex = 1, C_CurrencyInfo.GetCurrencyListSize() do
-        local currencyData = C_CurrencyInfo.GetCurrencyListInfo(currencyIndex);
+    local currencyIndex = 1
+    local currencyData = C_CurrencyInfo.GetCurrencyListInfo(currencyIndex);
 
-        if currencyData then
-            if(currencyData.isHeader) then
-                C_CurrencyInfo.ExpandCurrencyList(currencyIndex, true)
+    while(currencyData) do
+        if(currencyData.isHeader) then
+            C_CurrencyInfo.ExpandCurrencyList(currencyIndex, true)
 
-            end
         end
+
+        currencyIndex = currencyIndex + 1
+        currencyData = C_CurrencyInfo.GetCurrencyListInfo(currencyIndex);
     end
 end
 
@@ -83,11 +85,51 @@ local function updateCurrencyMap()
     end
 end
 
-local function updateBaseCurrencyList()
-    expandAllHeaders()
+local function resetExpandedList()
+    local currencyIndex = 1
+    local currencyData = C_CurrencyInfo.GetCurrencyListInfo(currencyIndex);
+
+    while(currencyData) do
+        if(currencyData.isHeader) then
+            if(expandedList[currencyData.name] ~= nil) then
+                C_CurrencyInfo.ExpandCurrencyList(currencyIndex, expandedList[currencyData.name])
+
+            else
+                C_CurrencyInfo.ExpandCurrencyList(currencyIndex, currencyData.isHeaderExpanded)
+
+            end
+        end
+
+        currencyIndex = currencyIndex + 1
+        currencyData = C_CurrencyInfo.GetCurrencyListInfo(currencyIndex);
+    end
+end
+
+local function saveExpandedList()
+    local currencyIndex = 1
+    local currencyData = C_CurrencyInfo.GetCurrencyListInfo(currencyIndex);
+
+    while(currencyData) do
+        if(currencyData.isHeader) then
+            expandedList[currencyData.name] = currencyData.isHeaderExpanded
+
+        end
+
+        currencyIndex = currencyIndex + 1
+        currencyData = C_CurrencyInfo.GetCurrencyListInfo(currencyIndex);
+    end
+end
+
+local function updateBaseCurrencyList(expand)
+    if(expand) then
+        expandAllHeaders()
+
+    end
 
     local upperHeader = nil
     local middleHeader = nil
+
+    baseList = {}
 
     for currencyIndex = 1, C_CurrencyInfo.GetCurrencyListSize() do
         local currencyData = C_CurrencyInfo.GetCurrencyListInfo(currencyIndex);
@@ -121,19 +163,15 @@ end
 local currencyList = {}
 local addedCurrencies = {}
 
-local actualIndex = 1
-
 local function addCurrencyToOfficialList(currencyIndex)
-    if(not addedCurrencies[currencyIndex]) then
-        if(not baseList[currencyIndex].isHeader or baseList[currencyIndex].isHeader and baseList[currencyIndex].isHeaderExpanded) then
-            tinsert(currencyList, baseList[currencyIndex])
-            addedCurrencies[currencyIndex] = true
-            
-            actualIndex = actualIndex + 1
+    if(not addedCurrencies[currencyIndex] and baseList[currencyIndex]) then
+        tinsert(currencyList, baseList[currencyIndex])
+        addedCurrencies[currencyIndex] = true
 
-        end
     end
 end
+
+local hadText = false
 
 local function loadCurrencySearch()
     if(TokenFrame) then
@@ -141,7 +179,7 @@ local function loadCurrencySearch()
         Settings.CreateCheckbox(category, descriptionSetting, "Include/exclude currency description searching (may lag on lower end machines).")
 
         local sortSetting = Settings.RegisterAddOnSetting(category, "CURRENCYSEARCH_SortByID", "sortByID", CURRENCYSEARCH_SETTINGS, "boolean", "Sort by currency ID", true)
-        sortSetting:SetValueChangedCallback(function() updateBaseCurrencyList() end)
+        sortSetting:SetValueChangedCallback(function() updateBaseCurrencyList(true) end)
         Settings.CreateCheckbox(category, sortSetting, "Sort currencies by their ID and not by name.")
         Settings.RegisterAddOnCategory(category)
         
@@ -160,13 +198,28 @@ local function loadCurrencySearch()
         searchBox:SetHeight(35)
         searchBox:SetWidth(160)
         searchBox:SetPoint("RIGHT", TokenFrame.filterDropdown, "LEFT", -5, 0)
+
         searchBox:SetScript("OnTextChanged", function(self)
             SearchBoxTemplate_OnTextChanged(self)
+
+            if(self:GetText() == "") then
+                resetExpandedList()
+                hadText = false
+                
+            elseif(not hadText) then
+                saveExpandedList()
+                hadText = true
+
+            end
     
             TokenFrame:Update()
         end)
 
-        updateBaseCurrencyList()
+        saveExpandedList()
+
+        updateBaseCurrencyList(true)
+
+        resetExpandedList()
         
         TokenFrame.Update = function()
             local self =  TokenFrame
@@ -180,28 +233,21 @@ local function loadCurrencySearch()
                 return;
             end
 
-            local boxText = searchBox:GetText() or ""
-
-            expandAllHeaders() --needed for clickable currencies
-
-            local lowerBoxText = string.lower(boxText)
+            local lowerBoxText = strlower(searchBox:GetText() or "")
+            updateBaseCurrencyList(lowerBoxText ~= "")
 
             currencyList = {};
             addedCurrencies = {}
 
-            local restAllowed
-
-            actualIndex = 1
+            local restAllowed, lastDepth
 
             for _, v in ipairs(map) do
                 restAllowed = false
-                --DEPTH0
                 local startIndex = string.find(strlower(baseList[v.currencyIndex].name), lowerBoxText)
 
                 if(startIndex) then
                     restAllowed = true
                     addCurrencyToOfficialList(v.currencyIndex)
-
                 end
         
                 if(v.children) then
@@ -214,6 +260,10 @@ local function loadCurrencySearch()
 
                         end
 
+                        if(lastDepth and lastDepth > 1) then
+                            restAllowed = false
+                        end
+
                         if(startIndex or restAllowed) then
                             if(baseList[y.currencyIndex].isHeader) then
                                 restAllowed = true
@@ -221,7 +271,6 @@ local function loadCurrencySearch()
                             
                             addCurrencyToOfficialList(baseList[y.currencyIndex].depth0Header)
                             addCurrencyToOfficialList(y.currencyIndex)
-
                         end
                             
                         if(y.children) then
@@ -239,6 +288,7 @@ local function loadCurrencySearch()
                                     addCurrencyToOfficialList(baseList[b.currencyIndex].depth1Header)
                                     addCurrencyToOfficialList(b.currencyIndex)
     
+                                    lastDepth = 2
                                 end
                             end
                         end
@@ -275,7 +325,7 @@ local function events(_, event, ...)
             loadCurrencySearch()
         end
     elseif(event == "CURRENCY_DISPLAY_UPDATE") then
-        updateBaseCurrencyList()
+        updateBaseCurrencyList(true)
         TokenFrame:Update()
 
     end
