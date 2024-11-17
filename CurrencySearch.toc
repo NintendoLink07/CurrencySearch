@@ -8,7 +8,7 @@
 ## AddonCompartmentFunc: CURRENCYSEARCH_OpenInterfaceOptions
 
 ## X-Website: https://github.com/NintendoLink07/CurrencySearch
-## X-Curse-Project-ID: 
-## X-Wago-ID: 
+## X-Curse-Project-ID: 1142996
+## X-Wago-ID: b6mbZYKP
 
 CurrencySearch.lua
