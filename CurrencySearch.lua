@@ -173,10 +173,106 @@ end
 
 local hadText = false
 
+local function enableAddonFunctionality()
+    TokenFrame.Update = function()
+        local self =  TokenFrame
+
+        local numTokenTypes = C_CurrencyInfo.GetCurrencyListSize();
+        CharacterFrameTab3:SetShown(numTokenTypes > 0);
+
+        local currencyDataReady = not C_CurrencyInfo.DoesCurrentFilterRequireAccountCurrencyData() or C_CurrencyInfo.IsAccountCharacterCurrencyDataReady();
+        self:SetLoadingSpinnerShown(not currencyDataReady);
+        if not currencyDataReady then
+            return;
+        end
+
+        local lowerBoxText = strlower(searchBox:GetText() or "")
+        updateBaseCurrencyList(lowerBoxText ~= "")
+
+        currencyList = {};
+        addedCurrencies = {}
+
+        local restAllowed, lastDepth
+
+        for _, v in ipairs(map) do
+            restAllowed = false
+            local startIndex = string.find(strlower(baseList[v.currencyIndex].name), lowerBoxText)
+
+            if(startIndex) then
+                restAllowed = true
+                addCurrencyToOfficialList(v.currencyIndex)
+            end
+    
+            if(v.children) then
+                for _, y in ipairs(v.children) do
+                    startIndex = string.find(strlower(baseList[y.currencyIndex].name), lowerBoxText)
+
+                    if(not startIndex and CURRENCYSEARCH_SETTINGS.includeDescriptions and baseList[y.currencyIndex].currencyID > 0) then
+                        startIndex = string.find(strlower(C_CurrencyInfo.GetCurrencyInfo(baseList[y.currencyIndex].currencyID).description), lowerBoxText)
+
+                    end
+
+                    if(lastDepth and lastDepth > 1) then
+                        restAllowed = false
+                    end
+
+                    if(startIndex or restAllowed) then
+                        if(baseList[y.currencyIndex].isHeader) then
+                            restAllowed = true
+                        end
+                        
+                        addCurrencyToOfficialList(baseList[y.currencyIndex].depth0Header)
+                        addCurrencyToOfficialList(y.currencyIndex)
+                    end
+                        
+                    if(y.children) then
+                        for _, b in ipairs(y.children) do
+                            --DEPTH2
+                            startIndex = string.find(strlower(baseList[b.currencyIndex].name), lowerBoxText)
+    
+                            if(not startIndex and CURRENCYSEARCH_SETTINGS.includeDescriptions and baseList[b.currencyIndex].currencyID > 0) then
+                                startIndex = string.find(strlower(C_CurrencyInfo.GetCurrencyInfo(baseList[b.currencyIndex].currencyID).description), lowerBoxText)
+    
+                            end
+
+                            if(startIndex or restAllowed) then
+                                addCurrencyToOfficialList(baseList[b.currencyIndex].depth0Header)
+                                addCurrencyToOfficialList(baseList[b.currencyIndex].depth1Header)
+                                addCurrencyToOfficialList(b.currencyIndex)
+
+                                lastDepth = 2
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        self.ScrollBox:SetDataProvider(CreateDataProvider(currencyList), ScrollBoxConstants.RetainScrollPosition);
+
+        -- If we're updating the currency list while the "Options" popup is open then we should refresh it as well
+        if self.selectedID and self.Popup:IsShown() then
+            local function FindSelectedTokenButton(button, elementData)
+                return elementData.currencyIndex == self.selectedID;
+            end
+
+            local selectedEntry = self.ScrollBox:FindFrameByPredicate(FindSelectedTokenButton);
+            if selectedEntry then
+                self:UpdatePopup(selectedEntry);
+            end
+        end
+
+        self.ScrollBox:RegisterCallback(ScrollBoxListMixin.Event.OnDataRangeChanged, GenerateClosure(self.RefreshAccountTransferableCurrenciesTutorial), self);
+    end
+end
+
 local function loadCurrencySearch()
     if(TokenFrame) then
         local descriptionSetting = Settings.RegisterAddOnSetting(category, "CURRENCYSEARCH_IncludeDescriptions", "includeDescriptions", CURRENCYSEARCH_SETTINGS, "boolean", "Include descriptions", false)
         Settings.CreateCheckbox(category, descriptionSetting, "Include/exclude currency description searching (may lag on lower end machines).")
+
+
+        Settings.RegisterAddOnSetting(category, "CURRENCYSEARCH_AllowTransfer", "allowTransfer", CURRENCYSEARCH_SETTINGS, "boolean", "Allow transfers of currency (this functionality is limited by Blizzard)", true)
 
         local sortSetting = Settings.RegisterAddOnSetting(category, "CURRENCYSEARCH_SortByID", "sortByID", CURRENCYSEARCH_SETTINGS, "boolean", "Sort by currency ID", true)
         sortSetting:SetValueChangedCallback(function() updateBaseCurrencyList(true) end)
@@ -194,11 +290,11 @@ local function loadCurrencySearch()
         settingsButton:SetFrameStrata("HIGH")
         settingsButton:SetPoint("RIGHT", CharacterFrameCloseButton, "LEFT", -2, 0)
     
-        searchBox = CreateFrame("EditBox", nil, TokenFrame, "SearchBoxTemplate")
+        searchBox = CreateFrame("EditBox", "TokenFrameSearchBox", TokenFrame, "SearchBoxTemplate")
         searchBox:SetHeight(35)
-        searchBox:SetWidth(160)
+        searchBox:SetWidth(140)
+        searchBox:SetShown(not CURRENCYSEARCH_SETTINGS.allowTransfer)
         searchBox:SetPoint("RIGHT", TokenFrame.filterDropdown, "LEFT", -5, 0)
-
         searchBox:SetScript("OnTextChanged", function(self)
             SearchBoxTemplate_OnTextChanged(self)
 
@@ -212,8 +308,37 @@ local function loadCurrencySearch()
 
             end
     
-            TokenFrame:Update()
+            if(not CURRENCYSEARCH_SETTINGS.allowTransfers) then
+                TokenFrame:Update()
+
+            end
         end)
+
+        local taintButton = CreateFrame("CheckButton", "TokenFrameAllowTransfersButton", TokenFrame, "UICheckButtonTemplate")
+        taintButton:SetSize(25, 25)
+        taintButton:SetPoint("RIGHT", searchBox, "LEFT", -5, 0)
+        taintButton:SetChecked(CURRENCYSEARCH_SETTINGS.allowTransfers)
+        taintButton:SetScript("OnClick", function(self)
+            CURRENCYSEARCH_SETTINGS.allowTransfers = self:GetChecked()
+
+            if(CURRENCYSEARCH_SETTINGS.allowTransfers) then
+                C_UI.Reload()
+
+            else
+                enableAddonFunctionality()
+
+            end
+
+            searchBox:SetShown(CURRENCYSEARCH_SETTINGS.allowTransfer)
+        end)
+        taintButton:SetScript("OnEnter", function(self)
+            --HERE
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText("Transfer of currency is currently " .. (self:GetChecked() and "enabled" or "disabled") .. ".")
+            GameTooltip:AddLine("If you want to search for currencies and have them sorted you have to disable this functionality.")
+            GameTooltip:Show()
+        end)
+        taintButton:SetScript("OnLeave", GameTooltip_Hide)
 
         saveExpandedList()
 
@@ -221,96 +346,8 @@ local function loadCurrencySearch()
 
         resetExpandedList()
         
-        TokenFrame.Update = function()
-            local self =  TokenFrame
-
-            local numTokenTypes = C_CurrencyInfo.GetCurrencyListSize();
-            CharacterFrameTab3:SetShown(numTokenTypes > 0);
-
-            local currencyDataReady = not C_CurrencyInfo.DoesCurrentFilterRequireAccountCurrencyData() or C_CurrencyInfo.IsAccountCharacterCurrencyDataReady();
-            self:SetLoadingSpinnerShown(not currencyDataReady);
-            if not currencyDataReady then
-                return;
-            end
-
-            local lowerBoxText = strlower(searchBox:GetText() or "")
-            updateBaseCurrencyList(lowerBoxText ~= "")
-
-            currencyList = {};
-            addedCurrencies = {}
-
-            local restAllowed, lastDepth
-
-            for _, v in ipairs(map) do
-                restAllowed = false
-                local startIndex = string.find(strlower(baseList[v.currencyIndex].name), lowerBoxText)
-
-                if(startIndex) then
-                    restAllowed = true
-                    addCurrencyToOfficialList(v.currencyIndex)
-                end
-        
-                if(v.children) then
-                    for _, y in ipairs(v.children) do
-                        --DEPTH1
-                        startIndex = string.find(strlower(baseList[y.currencyIndex].name), lowerBoxText)
-
-                        if(not startIndex and CURRENCYSEARCH_SETTINGS.includeDescriptions and baseList[y.currencyIndex].currencyID > 0) then
-                            startIndex = string.find(strlower(C_CurrencyInfo.GetCurrencyInfo(baseList[y.currencyIndex].currencyID).description), lowerBoxText)
-
-                        end
-
-                        if(lastDepth and lastDepth > 1) then
-                            restAllowed = false
-                        end
-
-                        if(startIndex or restAllowed) then
-                            if(baseList[y.currencyIndex].isHeader) then
-                                restAllowed = true
-                            end
-                            
-                            addCurrencyToOfficialList(baseList[y.currencyIndex].depth0Header)
-                            addCurrencyToOfficialList(y.currencyIndex)
-                        end
-                            
-                        if(y.children) then
-                            for _, b in ipairs(y.children) do
-                                --DEPTH2
-                                startIndex = string.find(strlower(baseList[b.currencyIndex].name), lowerBoxText)
-        
-                                if(not startIndex and CURRENCYSEARCH_SETTINGS.includeDescriptions and baseList[b.currencyIndex].currencyID > 0) then
-                                    startIndex = string.find(strlower(C_CurrencyInfo.GetCurrencyInfo(baseList[b.currencyIndex].currencyID).description), lowerBoxText)
-        
-                                end
-
-                                if(startIndex or restAllowed) then
-                                    addCurrencyToOfficialList(baseList[b.currencyIndex].depth0Header)
-                                    addCurrencyToOfficialList(baseList[b.currencyIndex].depth1Header)
-                                    addCurrencyToOfficialList(b.currencyIndex)
-    
-                                    lastDepth = 2
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-
-            self.ScrollBox:SetDataProvider(CreateDataProvider(currencyList), ScrollBoxConstants.RetainScrollPosition);
-
-            -- If we're updating the currency list while the "Options" popup is open then we should refresh it as well
-            if self.selectedID and self.Popup:IsShown() then
-                local function FindSelectedTokenButton(button, elementData)
-                    return elementData.currencyIndex == self.selectedID;
-                end
-
-                local selectedEntry = self.ScrollBox:FindFrameByPredicate(FindSelectedTokenButton);
-                if selectedEntry then
-                    self:UpdatePopup(selectedEntry);
-                end
-            end
-
-            self.ScrollBox:RegisterCallback(ScrollBoxListMixin.Event.OnDataRangeChanged, GenerateClosure(self.RefreshAccountTransferableCurrenciesTutorial), self);
+        if(not CURRENCYSEARCH_SETTINGS.allowTransfers) then
+            enableAddonFunctionality()
         end
         
         eventReceiver:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
@@ -323,11 +360,15 @@ local function events(_, event, ...)
     if(event == "PLAYER_ENTERING_WORLD") then
         if(TokenFrame and not _G["CurrencySearch_SettingsButton"]) then
             loadCurrencySearch()
+
         end
     elseif(event == "CURRENCY_DISPLAY_UPDATE") then
         updateBaseCurrencyList(true)
-        TokenFrame:Update()
 
+        if(not CURRENCYSEARCH_SETTINGS.allowTransfers) then
+            TokenFrame:Update()
+
+        end
     end
 end
 
